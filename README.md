@@ -1,5 +1,9 @@
 # ASPIDA robot - ASPiDA ESPA PROJECT
 
+
+<img src="imgs/aspida.png" width="200"/>
+
+
 ### Prerequisites:
 Install Ubuntu 20.04 - ROS noetic 
 
