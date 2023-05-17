@@ -9,11 +9,17 @@ Install Ubuntu 20.04 - ROS noetic
 
 Create a catkin workspace following the intructions: [catkin workspace](http://wiki.ros.org/catkin/Tutorials/create_a_workspace)
 
-Copy and paste in the ~/catkin_ws/src the following command:
+Make sure that you have added the following lines at the end of your ~/.bashrc file:
+```
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws/devel/setup.bash
+```
+
+Go to your ~/catkin_ws/src path:
 ```
 $ cd ~/catkin_ws/src/
 ```
-
+Add clone the following packages:
 ```
 $ git clone https://github.com/duth-lra/ridgeback
 $ git clone https://github.com/duth-lra/ridgeback_simulator
