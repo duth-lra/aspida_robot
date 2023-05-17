@@ -28,6 +28,7 @@ $ git clone https://github.com/duth-lra/ridgeback_baxter
 $ git clone https://github.com/ros-planning/navigation
 $ git clone https://github.com/nilseuropa/realsense_ros_gazebo
 ```
+Follow the next commands to intall the packages :
 ```
 $ cd ..
 ```
