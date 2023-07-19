@@ -12,6 +12,7 @@ from visualization_msgs.msg import Marker
 
 from move_base_msgs.msg import MoveBaseAction,MoveBaseGoal
 from actionlib.simple_action_client import SimpleActionClient
+from actionlib_msgs.msg import GoalID
 
 bridge = CvBridge()
 
@@ -19,6 +20,13 @@ bridge = CvBridge()
 # rospy.init_node('rviz_marker')
 marker_pub = rospy.Publisher("/visualization_marker", Marker, queue_size = 10)
 marker = Marker()
+
+
+pose_image_pub = rospy.Publisher("/pose_image", Image, queue_size = 10)
+pose_image = Image()
+
+stop_action_pub= rospy.Publisher("/move_base/cancel",GoalID, queue_size=10 )
+stop_action=GoalID()
 
 goal=MoveBaseGoal()
 ac= SimpleActionClient('move_base',MoveBaseAction)
@@ -110,13 +118,13 @@ def subscribe_to_topics():
 
     # Subscribe to the camera topic
     # rospy.Subscriber("/d435/depth/image_raw", Image, depth_image_callback)
-    # rospy.Subscriber("/d435/color/image_raw", Image, image_callback)
+    # rospy.Subscriber("/d435/color/image_rawent(xyz)", Image, image_callback)
     # rospy.Subscriber("/d435/color/camera_info", CameraInfo,camera_params_color)
     # rospy.Subscriber("/d435/depth/camera_info", CameraInfo,camera_params_depth)
-    rospy.Subscriber("/camera/aligned_depth_to_color/image_raw", Image, depth_image_callback)
-    rospy.Subscriber("/camera/color/image_raw", Image, image_callback)
-    rospy.Subscriber("/camera/color/camera_info", CameraInfo,camera_params_color)
-    rospy.Subscriber("/camera/aligned_depth_to_color/camera_info", CameraInfo,camera_params_depth)
+    rospy.Subscriber("/front_realsense/aligned_depth_to_color/image_raw", Image, depth_image_callback)
+    rospy.Subscriber("/front_realsense/color/image_raw", Image, image_callback)
+    rospy.Subscriber("/front_realsense/color/camera_info", CameraInfo,camera_params_color)
+    rospy.Subscriber("/front_realsense/aligned_depth_to_color/camera_info", CameraInfo,camera_params_depth)
     rospy.Subscriber("/amcl_pose", PoseWithCovarianceStamped, pose_callback)
 
 
@@ -127,21 +135,33 @@ def subscribe_to_topics():
     rate = rospy.Rate(10)  # 10 Hz
     while not rospy.is_shutdown():
         process_messages()
-        
         rate.sleep()
 
 
 
 def process_messages():
-    if received_messages['image'] is None or received_messages['depth'] is None or not received_messages['pose'] is None: return(0)
+    if received_messages['image'] is None or received_messages['depth'] is None or received_messages['pose'] is None: return(0)
     image=received_messages['image']
     xyz=get_pose(image)
     if xyz is None: 
         print('Person not found!')
     else:
         pass
-        toRviz(xyz)
-        movebase_client(xyz)
+        # rate2 = rospy.Rate(100)
+        if xyz[1]<=0.7:
+            toRviz(xyz,color='g')
+
+        if xyz[1]>0.7:
+            toRviz(xyz,color='r')
+            movebase_client(xyz)
+            rospy.sleep(10)
+
+
+        # if distance<0.3:
+        #     ActionStop()
+ 
+        
+        
         
 
 import cv2
@@ -155,25 +175,43 @@ def get_pose(image):
     results=pose.process(image)
     if results.pose_landmarks is not None:
         landmarks=results.pose_landmarks.landmark
+        # xyz=[np.asarray([l.x,l.y,l.z]) for l in landmarks if l.visibility>0.8]
         xyz=[np.asarray([l.x,l.y,l.z]) for l in landmarks]
+        # if len(xyz)<=25: return(None)
         #transform to true size
         h,w,_=image.shape
+
+
+
         xyz=(np.asarray(xyz)*np.asarray([w,h,1]))[:,:2]
+
 
         #remove landmarks that are outside of the image 
         mask = (xyz[:, 0] >= 0) & (xyz[:, 0] <= w) & (xyz[:, 1] >= 0) & (xyz[:, 1] <= h)
-        xyz = xyz[mask]
+        
+        xyz=np.floor(xyz[mask]).astype(int)
+        depth=received_messages['depth'][xyz[:,1].astype(int),[xyz[:,0].astype(int)]]
+        depth_m=np.median(depth)#/1000
 
-        depth=received_messages['depth'][xyz[:,1].astype(int),[xyz[:,0].astype(int)]]/1000
-        depth_m=np.median(depth)
+        # xyz = xyz/np.asarray([w,h])
+
+
+        # K=np.asarray([[607,0,319.42],[0,606.7,248.142],[0,0,1]])
+        # xyz=np.hstack([xyz,np.ones((len(xyz),1))])
+        # xyz=xyz@K
+        # xyz=xyz[:,:2]/xyz[:,2].reshape(-1,1)
+        
         xyz_m=np.median(xyz,axis=0)
         p3d=rs.rs2_deproject_pixel_to_point(received_messages['camera_info_depth'],xyz_m[:2],depth_m)
         # ptrack.append(p3d)
         # i=0
         # depth=received_messages['depth'][xyz[i,0].astype(int),[xyz[i,1].astype(int)]]/1000
         # p3d=rs.rs2_deproject_pixel_to_point(received_messages['camera_info_color'],xyz[i,:2].astype(int),depth)
-        return(p3d)
+        # image = cv2.circle(image, (xyz[0],xyz[1]), radius=2, color=(0, 0, 255), thickness=-1)
+        # pose_image_pub.publish(bridge.cv2_to_imgmsg(image))
+        return(np.asarray(p3d)/1000)
     else: 
+        # pose_image_pub.publish(bridge.cv2_to_imgmsg(image))
         return(None)
 
 
@@ -183,22 +221,31 @@ def movebase_client(target):
     client.wait_for_server()
 
     goal = MoveBaseGoal()
-    goal.target_pose.header.frame_id = "map"
+    goal.target_pose.header.frame_id = "chassis_link"#"map"
     goal.target_pose.header.stamp = rospy.Time.now()
-    goal.target_pose.pose.position.x = target[0]
-    goal.target_pose.pose.position.y = target[1]
+    goal.target_pose.pose.position.x = target[2]-0.5
+    goal.target_pose.pose.position.y = -target[0]
     goal.target_pose.pose.orientation.w = 1.0
-    
-    client.send_goal(goal)
-    wait = client.wait_for_result()
-    if not wait:
-        rospy.logerr("Action server not available!")
-        rospy.signal_shutdown("Action server not available!")
-    else:
-        return client.get_result()
 
-def toRviz(xyz):
-    marker.header.frame_id = "camera_color_optical_frame"#"/map"
+    client.cancel_goal()
+    sent=client.send_goal(goal)
+    # client.cancel_goal()/
+    # client.send_goal_and_wait(goal,15)
+    wait = client.wait_for_result(rospy.Duration(20))
+
+    # client.stop_tracking_goal()
+    client.cancel_goal()
+    
+    # if not wait:
+    #     rospy.logerr("Action server not available!")
+    #     rospy.signal_shutdown("Action server not available!")
+    # else:
+    #     print("Goal Reached!!")
+    #     # return client.get_result()
+
+
+def toRviz(xyz,color='g'):
+    marker.header.frame_id ="chassis_link"#"/map"
     marker.header.stamp = rospy.Time.now()
 
     # set shape, Arrow: 0; Cube: 1 ; Sphere: 2 ; Cylinder: 3
@@ -210,22 +257,33 @@ def toRviz(xyz):
     marker.scale.y = .5
     marker.scale.z = .5
 
-    # Set the color
-    marker.color.r = 0.0
-    marker.color.g = 100.0
-    marker.color.b = 0.0
-    marker.color.a = 1.0
+    if color=='g':
+        # Set the color
+        marker.color.r = 0.0
+        marker.color.g = 100.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
+    elif color=='r':
+        # Set the color
+        marker.color.r = 100.0
+        marker.color.g = 0.0
+        marker.color.b = 0.0
+        marker.color.a = 1.0
 
     # Set the pose of the marker
-    marker.pose.position.x = xyz[0]
-    marker.pose.position.y = xyz[1]
-    marker.pose.position.z = xyz[2]
+    marker.pose.position.x = xyz[2]
+    marker.pose.position.y = -xyz[0]
+    marker.pose.position.z = xyz[1]*0.0001
     marker.pose.orientation.x = 0.0
     marker.pose.orientation.y = 0.0
     marker.pose.orientation.z = 0.0
     marker.pose.orientation.w = 1.0
     marker_pub.publish(marker)
+    print(xyz)
 
+def ActionStop():
+    stop_action.stamp=rospy.Time.now()
+    stop_action.id =''
 # def convertTo3D(K,pts,depth):
 #     # pts in pixel, not normalized
 #     pcd = []
@@ -235,7 +293,7 @@ def toRviz(xyz):
 #            x = (j - CX_DEPTH) * z / FX_DEPTH
 #            y = (i - CY_DEPTH) * z / FY_DEPTH
 #            pcd.append([x, y, z])
-#     return(pcd)
+#     return(pcd)chassis_link
 
 
 # frame = cv2.imread('catkin_ws/src/myscripts/sample.jpg')
